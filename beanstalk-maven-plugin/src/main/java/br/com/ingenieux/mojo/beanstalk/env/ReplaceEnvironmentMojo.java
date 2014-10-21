@@ -63,6 +63,7 @@ import static org.apache.commons.lang.StringUtils.isNotBlank;
 @Mojo(name = "replace-environment")
 // Best Guess Evar
 public class ReplaceEnvironmentMojo extends CreateEnvironmentMojo {
+
   /**
    * Pattern for Increasing in Replace Environment
    */
@@ -129,11 +130,13 @@ public class ReplaceEnvironmentMojo extends CreateEnvironmentMojo {
   }
 
   @Override
-  protected Object executeInternal() throws AbstractMojoExecutionException {
-        /*
-                 * Is the desired cname not being used by other environments? If so,
-		 * just launch the environment
-		 */
+  protected Object executeInternal() throws Exception {
+    solutionStack = lookupSolutionStack(solutionStack);
+
+    /*
+     * Is the desired cname not being used by other environments? If so,
+     * just launch the environment
+     */
     if (!hasEnvironmentFor(applicationName, cnamePrefix)) {
       if (getLog().isInfoEnabled()) {
         getLog().info("Just launching a new environment.");
@@ -143,7 +146,7 @@ public class ReplaceEnvironmentMojo extends CreateEnvironmentMojo {
     }
 
 		/*
-		 * Gets the current environment using this cname
+                 * Gets the current environment using this cname
 		 */
     EnvironmentDescription curEnv = getEnvironmentFor(applicationName,
                                                       cnamePrefix);
@@ -157,7 +160,7 @@ public class ReplaceEnvironmentMojo extends CreateEnvironmentMojo {
     }
 
 		/*
-		 * Decides on a environmentRef, and launches a new environment
+                 * Decides on a environmentRef, and launches a new environment
 		 */
     String cnamePrefixToCreate = getCNamePrefixToCreate();
 
@@ -167,20 +170,21 @@ public class ReplaceEnvironmentMojo extends CreateEnvironmentMojo {
           + ".elasticbeanstalk.com");
     }
 
-        if(copyOptionSettings) {
-            copyOptionSettings(curEnv);
+    if (copyOptionSettings) {
+
+        copyOptionSettings(curEnv);
+
+        if (!solutionStack.equals(curEnv.getSolutionStackName())) {
+            if (getLog().isInfoEnabled()) {
+                getLog().warn(
+                        format(
+                                "(btw, we're launching with solutionStack/ set to '%s' instead of the default ('%s'). "
+                                        + "If this is not the case, then we kindly ask you to file a bug report on the mailing list :)",
+                                curEnv.getSolutionStackName(), solutionStack));
+            }
+
+            solutionStack = curEnv.getSolutionStackName();
         }
-
-    if (!solutionStack.equals(curEnv.getSolutionStackName())) {
-      if (getLog().isInfoEnabled()) {
-        getLog().warn(
-            format(
-                "(btw, we're launching with solutionStack/ set to '%s' instead of the default ('%s'). "
-                + "If this is not the case, then we kindly ask you to file a bug report on the mailing list :)",
-                curEnv.getSolutionStackName(), solutionStack));
-      }
-
-      solutionStack = curEnv.getSolutionStackName();
     }
 
     String newEnvironmentName = getNewEnvironmentName(StringUtils
@@ -222,7 +226,7 @@ public class ReplaceEnvironmentMojo extends CreateEnvironmentMojo {
       for (int i = 1; i <= maxAttempts; i++) {
         try {
           swapEnvironmentCNames(newEnvDesc.getEnvironmentId(),
-                                curEnv.getEnvironmentId(), cnamePrefix);
+                                curEnv.getEnvironmentId(), cnamePrefix, newEnvDesc);
           swapped = true;
           break;
         } catch (Throwable exc) {
@@ -232,8 +236,8 @@ public class ReplaceEnvironmentMojo extends CreateEnvironmentMojo {
           }
 
           getLog().warn(
-              format("Attempt #%d/%d failed. Sleeping and retrying. Reason: %s",
-                     i, maxAttempts, exc.getMessage()));
+              format("Attempt #%d/%d failed. Sleeping and retrying. Reason: %s (type: %s)",
+                     i, maxAttempts, exc.getMessage(), exc.getClass()));
 
           sleepInterval(attemptRetryInterval);
         }
@@ -279,7 +283,7 @@ public class ReplaceEnvironmentMojo extends CreateEnvironmentMojo {
    *
    * @param curEnv current environment
    */
-  private void copyOptionSettings(EnvironmentDescription curEnv) {
+  private void copyOptionSettings(EnvironmentDescription curEnv) throws Exception {
     /**
      * Skip if we don't have anything
      */
@@ -354,12 +358,13 @@ public class ReplaceEnvironmentMojo extends CreateEnvironmentMojo {
 
   /**
    * Swaps environment cnames
-   *
-   * @param newEnvironmentId environment id
+   *  @param newEnvironmentId environment id
    * @param curEnvironmentId environment id
+   * @param newEnv
    */
   protected void swapEnvironmentCNames(String newEnvironmentId,
-                                       String curEnvironmentId, String cnamePrefix)
+                                       String curEnvironmentId, String cnamePrefix,
+                                       EnvironmentDescription newEnv)
       throws AbstractMojoExecutionException {
     getLog().info(
         "Swapping environment cnames " + newEnvironmentId + " and "
@@ -382,15 +387,17 @@ public class ReplaceEnvironmentMojo extends CreateEnvironmentMojo {
     if (null != domains) {
       List<String> domainsToUse = new ArrayList<String>();
 
-      for (String s : domains)
-        if (isNotBlank(s))
+      for (String s : domains) {
+        if (isNotBlank(s)) {
           domainsToUse.add(s.trim());
+        }
+      }
 
-      if (! domainsToUse.isEmpty()) {
+      if (!domainsToUse.isEmpty()) {
 
         final BindDomainsContext
             ctx =
-            new BindDomainsContextBuilder().withCurEnv(this.curEnv).withDomains(domainsToUse)
+            new BindDomainsContextBuilder().withCurEnv(newEnv).withDomains(domainsToUse)
                 .build();
 
         new BindDomainsCommand(this).execute(
